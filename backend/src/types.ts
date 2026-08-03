@@ -4,7 +4,7 @@ export interface Env {
   DB: D1Database;
   TELEGRAM_BOT_TOKEN: string;
   WEBHOOK_SECRET: string;
-  MINIAPP_URL: string;
+  APP_URL: string; 
 }
 
 export interface TelegramUpdate {

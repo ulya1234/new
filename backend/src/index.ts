@@ -48,16 +48,17 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       const buttonText = t(userLang, "open_editor");
 
       await sendTextMessage(env, chatId, text, {
-        inline_keyboard: [
+        keyboard: [
           [
             {
               text: buttonText,
               web_app: {
-                url: env.MINIAPP_URL,
+                url: env.APP_URL, // sesuaikan dengan nama variabelmu
               },
             },
           ],
         ],
+        resize_keyboard: true
       });
       return;
     }
