@@ -1,0 +1,151 @@
+:root {
+  --bg: var(--tg-theme-secondary-bg-color, #f4f4f5);
+  --doc-bg: var(--tg-theme-bg-color, #ffffff);
+  --text: var(--tg-theme-text-color, #18181b);
+  --hint: var(--tg-theme-hint-color, #71717a);
+  --link: var(--tg-theme-link-color, #0284c7);
+  --btn: var(--tg-theme-button-color, #0284c7);
+  --btn-text: var(--tg-theme-button-text-color, #ffffff);
+  --border: rgba(0, 0, 0, 0.12);
+  --hover: rgba(0, 0, 0, 0.05);
+  --active-bg: rgba(2, 132, 199, 0.16);
+  --active-text: #0284c7;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  padding: 12px;
+  overflow-x: hidden;
+}
+
+.editor-surface {
+  min-height: 400px;
+  padding: 24px;
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--text);
+  outline: none;
+  overflow-y: auto;
+  word-break: break-word;
+}
+
+.editor-surface:empty:before {
+  content: attr(data-placeholder);
+  color: var(--hint);
+  pointer-events: none;
+  display: block;
+}
+
+.editor-surface b, .editor-surface strong {
+  font-weight: 700;
+  color: var(--link);
+}
+
+.editor-surface i, .editor-surface em {
+  font-style: italic;
+}
+
+.editor-surface u {
+  text-decoration: underline;
+}
+
+.editor-surface s, .editor-surface strike, .editor-surface del {
+  text-decoration: line-through;
+  opacity: 0.75;
+}
+
+.editor-surface h1, .editor-surface h2, .editor-surface h3 {
+  font-weight: 700;
+  margin: 16px 0 8px 0;
+  color: var(--text);
+}
+
+.editor-surface code {
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--link);
+}
+
+.editor-surface blockquote {
+  border-left: 3px solid var(--link);
+  margin: 12px 0;
+  padding-left: 14px;
+  color: var(--hint);
+  font-style: italic;
+}
+
+.editor-surface table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 14px 0;
+  font-size: 14px;
+}
+
+.editor-surface th, .editor-surface td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.editor-surface th {
+  background: var(--bg);
+  font-weight: 600;
+}
+
+.editor-surface details {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 12px 0;
+  background: var(--bg);
+}
+
+.editor-surface summary {
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--link);
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 100;
+  padding: 20px;
+}
+
+.modal-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.modal-box {
+  background: var(--doc-bg);
+  width: 100%;
+  max-width: 340px;
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+}

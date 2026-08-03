@@ -1,0 +1,3 @@
+TELEGRAM_BOT_TOKEN="1234567890:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+WEBHOOK_SECRET="my_secure_random_secret_token_123"
+APP_URL="https://telegram-rich-bot.your-subdomain.workers.dev"

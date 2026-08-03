@@ -1,0 +1,8 @@
+name = "telegram-rich-bot"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "telegram_rich_bot_db"
+database_id = "e201c730-ab8d-457a-95db-29949a4decaa"

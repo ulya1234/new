@@ -1,0 +1,7 @@
+{
+  "welcome": "Welcome to Rich Message Studio! Open the mini app below to craft beautiful structured rich messages with Markdown, tables, LaTeX, and collapsible blocks.",
+  "open_editor": "Open Rich Editor",
+  "choose_language": "Please select your preferred language:",
+  "language_updated": "Your language preference has been updated to English.",
+  "error_occurred": "An unexpected error occurred. Please try again later."
+}
