@@ -4,25 +4,33 @@ import {
   Italic,
   Underline,
   Strikethrough,
-  Heading,
+  Heading1,
+  Heading2,
   Code,
-  Sigma,
   List,
   ListOrdered,
   Quote,
   FolderKanban,
   Table as TableIcon,
+  Image as ImageIcon,
 } from "lucide-react";
 
 export default function App() {
   const editorRef = useRef<HTMLDivElement>(null);
+  const selectionRangeRef = useRef<Range | null>(null);
+
   const [activeTab, setActiveTab] = useState<"visual" | "markdown">("visual");
   const [markdownOutput, setMarkdownOutput] = useState<string>("");
   const [charCount, setCharCount] = useState<number>(0);
   const [blockCount, setBlockCount] = useState<number>(1);
-  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  
+  const [isTableModalOpen, setIsTableModalOpen] = useState<boolean>(false);
   const [rows, setRows] = useState<number>(3);
   const [cols, setCols] = useState<number>(2);
+
+  const [isImageModalOpen, setIsImageModalOpen] = useState<boolean>(false);
+  const [imgUrl, setImgUrl] = useState<string>("");
+  const [imgAlt, setImgAlt] = useState<string>("");
 
   const [activeFormats, setActiveFormats] = useState({
     bold: false,
@@ -52,7 +60,26 @@ export default function App() {
     }
   }, []);
 
-  const checkActiveFormats = () => {
+  const saveSelection = () => {
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      selectionRangeRef.current = selection.getRangeAt(0).cloneRange();
+    }
+  };
+
+  const restoreSelection = () => {
+    if (editorRef.current && selectionRangeRef.current) {
+      editorRef.current.focus();
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(selectionRangeRef.current);
+    } else if (editorRef.current) {
+      editorRef.current.focus();
+    }
+  };
+
+  const handleEditorInteraction = () => {
+    saveSelection();
     setActiveFormats({
       bold: document.queryCommandState("bold"),
       italic: document.queryCommandState("italic"),
@@ -66,58 +93,39 @@ export default function App() {
       const text = editorRef.current.innerText || "";
       setCharCount(text.length);
       const blocks =
-        editorRef.current.querySelectorAll("h1, h2, h3, p, table, details, blockquote, li")
+        editorRef.current.querySelectorAll("h1, h2, h3, p, table, details, blockquote, li, img")
           .length || 1;
       setBlockCount(blocks);
     }
   };
 
   const executeCommand = (command: string, value: string | undefined = undefined) => {
-    if (!editorRef.current) return;
-    editorRef.current.focus();
+    restoreSelection();
     document.execCommand(command, false, value);
-    checkActiveFormats();
+    handleEditorInteraction();
   };
 
-  const insertInlineCode = () => {
-    if (!editorRef.current) return;
-    editorRef.current.focus();
-    const selection = window.getSelection();
-    if (!selection || !selection.rangeCount) return;
-    const range = selection.getRangeAt(0);
-    const text = range.toString() || "code";
-    const codeNode = document.createElement("code");
-    codeNode.innerText = text;
-    range.deleteContents();
-    range.insertNode(codeNode);
-    selection.collapseToEnd();
-    checkActiveFormats();
-  };
-
-  const insertMath = () => {
-    const mathText = prompt("Enter LaTeX math formula:", "E = mc^2");
-    if (!mathText || !editorRef.current) return;
-    editorRef.current.focus();
-    document.execCommand("insertText", false, ` $${mathText}$ `);
-    checkActiveFormats();
+  const insertCodeBlock = () => {
+    restoreSelection();
+    const html = `<br><pre><code>// Write code here...</code></pre><br>`;
+    document.execCommand("insertHTML", false, html);
+    handleEditorInteraction();
   };
 
   const insertCollapsible = () => {
+    restoreSelection();
     const detailsHtml = `<br><details open><summary><b>Collapsible Section</b></summary><p>Write content here...</p></details><br>`;
-    if (!editorRef.current) return;
-    editorRef.current.focus();
     document.execCommand("insertHTML", false, detailsHtml);
-    checkActiveFormats();
+    handleEditorInteraction();
   };
 
   const insertTable = () => {
-    if (!editorRef.current) return;
+    restoreSelection();
     let tableHtml = "<table><thead><tr>";
     for (let c = 1; c <= cols; c++) {
       tableHtml += `<th>Header ${c}</th>`;
     }
     tableHtml += "</tr></thead><tbody>";
-
     for (let r = 1; r <= rows; r++) {
       tableHtml += "<tr>";
       for (let c = 1; c <= cols; c++) {
@@ -126,25 +134,36 @@ export default function App() {
       tableHtml += "</tr>";
     }
     tableHtml += "</tbody></table><br>";
-
-    editorRef.current.focus();
+    
     document.execCommand("insertHTML", false, tableHtml);
-    setIsModalOpen(false);
-    checkActiveFormats();
+    setIsTableModalOpen(false);
+    handleEditorInteraction();
+  };
+
+  const insertImage = () => {
+    if (!imgUrl) return;
+    restoreSelection();
+    const html = `<br><img src="${imgUrl}" alt="${imgAlt || 'Image'}" style="max-width: 100%; border-radius: 8px;" /><br>`;
+    document.execCommand("insertHTML", false, html);
+    setIsImageModalOpen(false);
+    setImgUrl("");
+    setImgAlt("");
+    handleEditorInteraction();
   };
 
   const compileHtmlToMarkdown = (node: Node): string => {
     let markdown = "";
     const children = node.childNodes;
-
+    
     for (let i = 0; i < children.length; i++) {
       const child = children[i];
+      
       if (child.nodeType === Node.TEXT_NODE) {
         markdown += child.textContent;
       } else if (child.nodeType === Node.ELEMENT_NODE) {
         const element = child as HTMLElement;
         const tag = element.nodeName.toLowerCase();
-
+        
         if (tag === "b" || tag === "strong") {
           markdown += `**${compileHtmlToMarkdown(element)}**`;
         } else if (tag === "i" || tag === "em") {
@@ -155,8 +174,16 @@ export default function App() {
           markdown += `~~${compileHtmlToMarkdown(element)}~~`;
         } else if (tag === "code") {
           markdown += `\`${element.textContent}\``;
-        } else if (tag === "h1" || tag === "h2" || tag === "h3") {
+        } else if (tag === "pre") {
+          const codeEl = element.querySelector("code");
+          const codeText = codeEl ? codeEl.textContent : element.textContent;
+          markdown += `\n\`\`\`\n${codeText}\n\`\`\`\n\n`;
+        } else if (tag === "h1") {
+          markdown += `\n# ${compileHtmlToMarkdown(element).trim()}\n\n`;
+        } else if (tag === "h2") {
           markdown += `\n## ${compileHtmlToMarkdown(element).trim()}\n\n`;
+        } else if (tag === "h3") {
+          markdown += `\n### ${compileHtmlToMarkdown(element).trim()}\n\n`;
         } else if (tag === "blockquote") {
           const lines = compileHtmlToMarkdown(element).trim().split("\n");
           markdown += "\n" + lines.map((l) => `> ${l}`).join("\n") + "\n\n";
@@ -167,6 +194,10 @@ export default function App() {
             markdown += `${prefix}${compileHtmlToMarkdown(li).trim()}\n`;
           });
           markdown += "\n";
+        } else if (tag === "img") {
+          const src = element.getAttribute("src") || "";
+          const alt = element.getAttribute("alt") || "";
+          markdown += `\n![${alt}](${src})\n\n`;
         } else if (tag === "table") {
           const trs = element.querySelectorAll("tr");
           trs.forEach((row, rowIndex) => {
@@ -213,52 +244,19 @@ export default function App() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "4px 2px",
-        }}
-      >
-        <span style={{ fontSize: "17px", fontWeight: 700 }}>Document</span>
-        <div
-          style={{
-            display: "flex",
-            background: "var(--doc-bg)",
-            border: "1px solid var(--border)",
-            borderRadius: "8px",
-            padding: "2px",
-          }}
-        >
+    <div className="app-container">
+      <div className="header">
+        <span className="brand-title">Document</span>
+        <div className="tab-switcher">
           <button
             onClick={() => handleTabSwitch("visual")}
-            style={{
-              padding: "5px 12px",
-              borderRadius: "6px",
-              border: "none",
-              background: activeTab === "visual" ? "var(--bg)" : "transparent",
-              color: activeTab === "visual" ? "var(--text)" : "var(--hint)",
-              fontSize: "12px",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
+            className={`tab-btn ${activeTab === "visual" ? "active" : ""}`}
           >
             Editor
           </button>
           <button
             onClick={() => handleTabSwitch("markdown")}
-            style={{
-              padding: "5px 12px",
-              borderRadius: "6px",
-              border: "none",
-              background: activeTab === "markdown" ? "var(--bg)" : "transparent",
-              color: activeTab === "markdown" ? "var(--text)" : "var(--hint)",
-              fontSize: "12px",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
+            className={`tab-btn ${activeTab === "markdown" ? "active" : ""}`}
           >
             Markdown
           </button>
@@ -266,319 +264,203 @@ export default function App() {
       </div>
 
       {activeTab === "visual" && (
-        <div
-          style={{
-            position: "sticky",
-            top: 0,
-            zIndex: 50,
-            background: "var(--doc-bg)",
-            borderRadius: "10px",
-            border: "1px solid var(--border)",
-            padding: "6px",
-            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.05)",
-            overflowX: "auto",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "3px", width: "max-content" }}>
+        <div className="toolbar">
+          <div className="toolbar-group">
             <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                executeCommand("bold");
-              }}
-              style={getBtnStyle(activeFormats.bold)}
+              onMouseDown={(e) => { e.preventDefault(); executeCommand("bold"); }}
+              className={`tool-btn ${activeFormats.bold ? "active" : ""}`}
               title="Bold"
             >
-              <Bold size={17} />
+              <Bold size={18} />
             </button>
             <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                executeCommand("italic");
-              }}
-              style={getBtnStyle(activeFormats.italic)}
+              onMouseDown={(e) => { e.preventDefault(); executeCommand("italic"); }}
+              className={`tool-btn ${activeFormats.italic ? "active" : ""}`}
               title="Italic"
             >
-              <Italic size={17} />
+              <Italic size={18} />
             </button>
             <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                executeCommand("underline");
-              }}
-              style={getBtnStyle(activeFormats.underline)}
+              onMouseDown={(e) => { e.preventDefault(); executeCommand("underline"); }}
+              className={`tool-btn ${activeFormats.underline ? "active" : ""}`}
               title="Underline"
             >
-              <Underline size={17} />
+              <Underline size={18} />
             </button>
             <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                executeCommand("strikeThrough");
-              }}
-              style={getBtnStyle(activeFormats.strikeThrough)}
+              onMouseDown={(e) => { e.preventDefault(); executeCommand("strikeThrough"); }}
+              className={`tool-btn ${activeFormats.strikeThrough ? "active" : ""}`}
               title="Strikethrough"
             >
-              <Strikethrough size={17} />
+              <Strikethrough size={18} />
             </button>
-
-            <div style={dividerStyle} />
-
+            
+            <div className="divider" />
+            
             <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                executeCommand("formatBlock", "<h2>");
-              }}
-              style={getBtnStyle(false)}
-              title="Heading"
+              onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<h1>"); }}
+              className="tool-btn"
+              title="Heading 1"
             >
-              <Heading size={17} />
+              <Heading1 size={18} />
             </button>
             <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                insertInlineCode();
-              }}
-              style={getBtnStyle(false)}
-              title="Code"
+              onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<h2>"); }}
+              className="tool-btn"
+              title="Heading 2"
             >
-              <Code size={17} />
+              <Heading2 size={18} />
             </button>
             <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                insertMath();
-              }}
-              style={getBtnStyle(false)}
-              title="LaTeX"
+              onMouseDown={(e) => { e.preventDefault(); insertCodeBlock(); }}
+              className="tool-btn"
+              title="Code Block"
             >
-              <Sigma size={17} />
+              <Code size={18} />
             </button>
 
-            <div style={dividerStyle} />
+            <div className="divider" />
 
             <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                executeCommand("insertUnorderedList");
-              }}
-              style={getBtnStyle(activeFormats.ul)}
+              onMouseDown={(e) => { e.preventDefault(); executeCommand("insertUnorderedList"); }}
+              className={`tool-btn ${activeFormats.ul ? "active" : ""}`}
               title="Bullet List"
             >
-              <List size={17} />
+              <List size={18} />
             </button>
             <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                executeCommand("insertOrderedList");
-              }}
-              style={getBtnStyle(activeFormats.ol)}
+              onMouseDown={(e) => { e.preventDefault(); executeCommand("insertOrderedList"); }}
+              className={`tool-btn ${activeFormats.ol ? "active" : ""}`}
               title="Numbered List"
             >
-              <ListOrdered size={17} />
+              <ListOrdered size={18} />
             </button>
             <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                executeCommand("formatBlock", "<blockquote>");
-              }}
-              style={getBtnStyle(false)}
+              onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<blockquote>"); }}
+              className="tool-btn"
               title="Quote"
             >
-              <Quote size={17} />
+              <Quote size={18} />
             </button>
 
-            <div style={dividerStyle} />
+            <div className="divider" />
 
             <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                insertCollapsible();
+              onMouseDown={(e) => { 
+                e.preventDefault(); 
+                saveSelection();
+                setIsImageModalOpen(true); 
               }}
-              style={getBtnStyle(false)}
+              className="tool-btn"
+              title="Insert Image"
+            >
+              <ImageIcon size={18} />
+            </button>
+            <button
+              onMouseDown={(e) => { e.preventDefault(); insertCollapsible(); }}
+              className="tool-btn"
               title="Collapsible"
             >
-              <FolderKanban size={17} />
+              <FolderKanban size={18} />
             </button>
             <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                setIsModalOpen(true);
+              onMouseDown={(e) => { 
+                e.preventDefault(); 
+                saveSelection();
+                setIsTableModalOpen(true); 
               }}
-              style={getBtnStyle(false)}
+              className="tool-btn"
               title="Table"
             >
-              <TableIcon size={17} />
+              <TableIcon size={18} />
             </button>
           </div>
         </div>
       )}
 
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          background: "var(--doc-bg)",
-          border: "1px solid var(--border)",
-          borderRadius: "10px",
-          boxShadow: "0 4px 16px rgba(0, 0, 0, 0.04)",
-          minHeight: "420px",
-          overflow: "hidden",
-        }}
-      >
+      <div className="editor-wrapper">
         <div
           ref={editorRef}
           contentEditable={activeTab === "visual"}
-          onKeyUp={checkActiveFormats}
-          onMouseUp={checkActiveFormats}
-          onInput={checkActiveFormats}
+          onKeyUp={handleEditorInteraction}
+          onMouseUp={handleEditorInteraction}
+          onInput={handleEditorInteraction}
+          onBlur={saveSelection}
           className="editor-surface"
-          style={{
-            display: activeTab === "visual" ? "block" : "none",
-          }}
-          data-placeholder="Start typing your document here..."
+          style={{ display: activeTab === "visual" ? "block" : "none" }}
+          data-placeholder="Start writing your document here..."
         />
         {activeTab === "markdown" && (
-          <pre
-            style={{
-              padding: "24px",
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: "13px",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              minHeight: "420px",
-              background: "var(--doc-bg)",
-            }}
-          >
+          <pre className="markdown-preview">
             {markdownOutput || "No markdown generated yet."}
           </pre>
         )}
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "0 4px",
-          fontSize: "12px",
-          color: "var(--hint)",
-        }}
-      >
+      <div className="status-bar">
         <span>{charCount} characters</span>
-        <span>
-          {blockCount} {blockCount === 1 ? "block" : "blocks"}
-        </span>
+        <span>{blockCount} {blockCount === 1 ? "block" : "blocks"}</span>
       </div>
 
-      <div className={`modal-overlay ${isModalOpen ? "active" : ""}`}>
+      <div className={`modal-overlay ${isTableModalOpen ? "active" : ""}`}>
         <div className="modal-box">
-          <h2 style={{ fontSize: "16px", fontWeight: 600 }}>Insert Table</h2>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "12px",
-            }}
-          >
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "12px", color: "var(--hint)", fontWeight: 500 }}>
-                Rows
-              </label>
+          <h2>Insert Table</h2>
+          <div className="modal-grid">
+            <div className="input-group">
+              <label>Rows</label>
               <input
                 type="number"
                 value={rows}
                 min={1}
                 max={15}
                 onChange={(e) => setRows(parseInt(e.target.value, 10) || 1)}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: "6px",
-                  border: "1px solid var(--border)",
-                  background: "var(--doc-bg)",
-                  color: "var(--text)",
-                  outline: "none",
-                  fontSize: "14px",
-                }}
               />
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "12px", color: "var(--hint)", fontWeight: 500 }}>
-                Columns
-              </label>
+            <div className="input-group">
+              <label>Columns</label>
               <input
                 type="number"
                 value={cols}
                 min={1}
                 max={6}
                 onChange={(e) => setCols(parseInt(e.target.value, 10) || 1)}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: "6px",
-                  border: "1px solid var(--border)",
-                  background: "var(--doc-bg)",
-                  color: "var(--text)",
-                  outline: "none",
-                  fontSize: "14px",
-                }}
               />
             </div>
           </div>
-          <div style={{ display: "flex", justifySelf: "flex-end", gap: "8px" }}>
-            <button
-              onClick={() => setIsModalOpen(false)}
-              style={{
-                padding: "8px 14px",
-                borderRadius: "6px",
-                border: "none",
-                background: "var(--bg)",
-                color: "var(--text)",
-                fontSize: "13px",
-                fontWeight: 500,
-                cursor: "pointer",
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={insertTable}
-              style={{
-                padding: "8px 14px",
-                borderRadius: "6px",
-                border: "none",
-                background: "var(--btn)",
-                color: "var(--btn-text)",
-                fontSize: "13px",
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              Insert
-            </button>
+          <div className="modal-actions">
+            <button className="btn-cancel" onClick={() => setIsTableModalOpen(false)}>Cancel</button>
+            <button className="btn-submit" onClick={insertTable}>Insert</button>
+          </div>
+        </div>
+      </div>
+
+      <div className={`modal-overlay ${isImageModalOpen ? "active" : ""}`}>
+        <div className="modal-box">
+          <h2>Insert Image</h2>
+          <div className="input-group full-width">
+            <label>Image URL (HTTP/HTTPS)</label>
+            <input
+              type="text"
+              placeholder="https://example.com/image.jpg"
+              value={imgUrl}
+              onChange={(e) => setImgUrl(e.target.value)}
+            />
+          </div>
+          <div className="input-group full-width" style={{ marginTop: '12px' }}>
+            <label>Caption / Alt Text (Optional)</label>
+            <input
+              type="text"
+              placeholder="Beautiful scenery"
+              value={imgAlt}
+              onChange={(e) => setImgAlt(e.target.value)}
+            />
+          </div>
+          <div className="modal-actions" style={{ marginTop: '20px' }}>
+            <button className="btn-cancel" onClick={() => setIsImageModalOpen(false)}>Cancel</button>
+            <button className="btn-submit" onClick={insertImage}>Insert</button>
           </div>
         </div>
       </div>
     </div>
   );
 }
-
-const getBtnStyle = (isActive: boolean): React.CSSProperties => ({
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: "36px",
-  height: "36px",
-  borderRadius: "8px",
-  border: "none",
-  background: isActive ? "var(--active-bg)" : "transparent",
-  color: isActive ? "var(--active-text)" : "var(--text)",
-  cursor: "pointer",
-  transition: "all 0.15s ease",
-  transform: isActive ? "scale(0.96)" : "scale(1)",
-});
-
-const dividerStyle: React.CSSProperties = {
-  width: "1px",
-  height: "20px",
-  background: "var(--border)",
-  margin: "0 4px",
-};
