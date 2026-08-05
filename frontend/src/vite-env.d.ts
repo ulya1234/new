@@ -8,6 +8,7 @@ interface Window {
       close: () => void;
       sendData: (data: string) => void;
       showAlert: (message: string) => void;
+      colorScheme?: "light" | "dark";
       initDataUnsafe?: {
         user?: {
           id: number;

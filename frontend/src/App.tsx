@@ -1,38 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Undo,
-  Redo,
-  Bold,
-  Italic,
-  Underline,
-  Strikethrough,
-  Type,
-  Code,
-  List,
-  ListOrdered,
-  Quote,
-  FolderKanban,
-  Table as TableIcon,
-  Image as ImageIcon,
-  Menu,
-  X,
-  Plus,
-  Trash2,
-  Columns,
-  Rows,
-  AlignLeft,
-  Heading1,
-  Heading2,
-  Heading3,
-  Heading4,
-  Heading5,
-  Heading6,
-  Link as LinkIcon,
-  EyeOff,
-  Highlighter,
-  Indent,
-  Outdent,
-  Eraser
+  Undo, Redo, Bold, Italic, Underline, Strikethrough, Type, Code,
+  List, ListOrdered, Quote, FolderKanban, Table as TableIcon,
+  Image as ImageIcon, Menu, X, Plus, Trash2, Columns, Rows,
+  AlignLeft, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6,
+  Link as LinkIcon, EyeOff, Highlighter, Indent, Outdent, Eraser,
+  Sun, Moon
 } from "lucide-react";
 
 interface HeadingData {
@@ -51,47 +24,55 @@ const MAX_CHARS = 32768;
 export default function App() {
   const editorRef = useRef<HTMLDivElement>(null);
   const selectionRangeRef = useRef<Range | null>(null);
-
-  const [activeTab, setActiveTab] = useState<"visual" | "markdown">("visual");
-  const [markdownOutput, setMarkdownOutput] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<"visual" | "source">("visual");
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [htmlOutput, setHtmlOutput] = useState<string>("");
   const [charCount, setCharCount] = useState<number>(0);
-  
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [headings, setHeadings] = useState<HeadingData[]>([]);
-
   const [isHeadingMenuOpen, setIsHeadingMenuOpen] = useState<boolean>(false);
   
-  // Media Modal States
   const [isMediaModalOpen, setIsMediaModalOpen] = useState<boolean>(false);
   const [mediaLayout, setMediaLayout] = useState<"single" | "collage" | "slideshow">("single");
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([{ type: "img", url: "" }]);
   const [mediaCaption, setMediaCaption] = useState<string>("");
-
+  
   const [isTableModalOpen, setIsTableModalOpen] = useState<boolean>(false);
   const [rows, setRows] = useState<number>(3);
   const [cols, setCols] = useState<number>(2);
-
+  
   const [isLinkModalOpen, setIsLinkModalOpen] = useState<boolean>(false);
   const [linkUrl, setLinkUrl] = useState<string>("");
   const [linkText, setLinkText] = useState<string>("");
-
+  
   const [isCodeModalOpen, setIsCodeModalOpen] = useState<boolean>(false);
   const [codeLang, setCodeLang] = useState<string>("");
-
+  
   const [tableMenu, setTableMenu] = useState<{ show: boolean; top: number; left: number; cell: HTMLTableCellElement | null }>({
     show: false, top: 0, left: 0, cell: null
   });
-
+  
   const [activeFormats, setActiveFormats] = useState({
-    bold: false, italic: false, underline: false, strikeThrough: false, ul: false, ol: false,
+    bold: false, italic: false, underline: false, strikeThrough: false, ul: false, ol: false, highlight: false, spoiler: false
   });
 
   useEffect(() => {
+    try {
+      document.execCommand("defaultParagraphSeparator", false, "p");
+    } catch {
+    }
+
     const tg = window.Telegram?.WebApp;
     if (tg) {
       tg.expand();
       tg.ready();
       tg.MainButton.setText("SEND ARTICLE");
+      
+      if (tg.colorScheme === "light") {
+        setTheme("light");
+      } else {
+        setTheme("dark");
+      }
       
       tg.MainButton.onClick(() => {
         if (!editorRef.current) return;
@@ -101,33 +82,34 @@ export default function App() {
           tg.showAlert("Please enter some content before sending.");
           return;
         }
-
         if (textLen > MAX_CHARS) {
           tg.showAlert(`Character limit exceeded! Maximum is ${MAX_CHARS.toLocaleString()}.`);
           return;
         }
         
-        let generatedMarkdown = compileHtmlToMarkdown(editorRef.current);
-        generatedMarkdown = generatedMarkdown.replace(/\n{3,}/g, '\n\n').trim();
-
+        let generatedHtml = compileToTelegramHtml(editorRef.current);
+        generatedHtml = generatedHtml.replace(/\n\s*\n/g, '\n').trim();
+        
         const urlParams = new URLSearchParams(window.location.search);
         const apiUrl = urlParams.get("api");
         const chatId = tg.initDataUnsafe?.user?.id || tg.initDataUnsafe?.chat?.id;
-
+        
         if (apiUrl && chatId) {
           tg.MainButton.showProgress();
           fetch(apiUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id: chatId, markdown: generatedMarkdown })
+            body: JSON.stringify({ chat_id: chatId, markdown: generatedHtml })
           }).then(() => {
             tg.close();
           }).catch(() => {
+            console.error("[API Error] Failed to publish the article via API");
             tg.showAlert("Failed to publish the article.");
             tg.MainButton.hideProgress();
           });
         } else {
-          tg.sendData(JSON.stringify({ markdown: generatedMarkdown }));
+          console.log("[Core] Sending HTML payload to Telegram WebApp");
+          tg.sendData(JSON.stringify({ markdown: generatedHtml }));
         }
       });
     }
@@ -174,6 +156,21 @@ export default function App() {
 
   const handleEditorInteraction = (e?: React.MouseEvent | React.KeyboardEvent | React.SyntheticEvent) => {
     saveSelection();
+    
+    let isHighlight = false;
+    let isSpoiler = false;
+    const selection = window.getSelection();
+    
+    if (selection && selection.rangeCount > 0) {
+      let node = selection.anchorNode;
+      let parent = node?.nodeType === 3 ? node.parentElement : node as HTMLElement;
+      while (parent && parent !== editorRef.current) {
+        if (parent.tagName.toLowerCase() === 'mark') isHighlight = true;
+        if (parent.tagName.toLowerCase() === 'span' && parent.classList.contains('tg-spoiler')) isSpoiler = true;
+        parent = parent.parentElement;
+      }
+    }
+
     setActiveFormats({
       bold: document.queryCommandState("bold"),
       italic: document.queryCommandState("italic"),
@@ -181,14 +178,20 @@ export default function App() {
       strikeThrough: document.queryCommandState("strikeThrough"),
       ul: document.queryCommandState("insertUnorderedList"),
       ol: document.queryCommandState("insertOrderedList"),
+      highlight: isHighlight,
+      spoiler: isSpoiler
     });
-
+    
     if (editorRef.current) {
       setCharCount(editorRef.current.innerText?.length || 0);
     }
-
+    
     if (e && e.type === "click") {
       const target = e.target as HTMLElement;
+      if (target.classList.contains("tg-spoiler")) {
+        target.classList.toggle("revealed");
+      }
+
       const td = target.closest("td, th") as HTMLTableCellElement;
       if (td) {
         const rect = td.getBoundingClientRect();
@@ -211,22 +214,21 @@ export default function App() {
         const node = selection.focusNode;
         if (node) {
           const element = node.nodeType === 3 ? node.parentElement : node as HTMLElement;
-          
           const isQuote = element?.closest('blockquote');
+          const isTable = element?.closest('table');
+          
           if (isQuote && node.textContent?.trim() === "") {
             e.preventDefault();
             document.execCommand('formatBlock', false, 'p');
             return;
           }
-
-          const isTable = element?.closest('table');
+          
           if (isTable) {
             e.preventDefault();
             const tableWrapper = element?.closest('.table-responsive') || isTable;
             const p = document.createElement('p');
             p.innerHTML = '<br>';
             tableWrapper.parentNode?.insertBefore(p, tableWrapper.nextSibling);
-            
             const newRange = document.createRange();
             newRange.setStart(p, 0);
             newRange.collapse(true);
@@ -242,35 +244,22 @@ export default function App() {
 
   const handlePaste = (e: React.ClipboardEvent) => {
     e.preventDefault();
-    const text = e.clipboardData.getData("text/plain");
-    
-    let html = text
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/^###### (.*$)/gim, '<h6>$1</h6>')
-      .replace(/^##### (.*$)/gim, '<h5>$1</h5>')
-      .replace(/^#### (.*$)/gim, '<h4>$1</h4>')
-      .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-      .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-      .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-      .replace(/\*\*(.*?)\*\*/gim, '<b>$1</b>')
-      .replace(/\*(.*?)\*/gim, '<i>$1</i>')
-      .replace(/__(.*?)__/gim, '<u>$1</u>')
-      .replace(/~~(.*?)~~/gim, '<s>$1</s>')
-      .replace(/==(.*?)==/gim, '<mark>$1</mark>')
-      .replace(/\|\|(.*?)\|\|/gim, '<span class="tg-spoiler">$1</span>')
-      .replace(/`(.*?)`/gim, '<code>$1</code>')
-      .replace(/\[(.*?)\]\((.*?)\)/gim, '<a href="$2">$1</a>')
-      .replace(/^> (.*$)/gim, '<blockquote>$1</blockquote>');
+    const plainText = e.clipboardData.getData("text/plain");
 
-    html = html.split(/\n\n+/).map(para => {
-      if (para.trim().startsWith('<h') || para.trim().startsWith('<blockquote')) {
-        return para.replace(/\n/g, '<br>');
-      }
-      return `<p>${para.replace(/\n/g, '<br>')}</p>`;
-    }).join('');
-
-    document.execCommand("insertHTML", false, html);
+    // Jika teks yang disalin mengandung tag HTML murni (seperti <h1>, <b>, <hr/>), 
+    // render langsung sebagai HTML ke dalam editor
+    if (/<[a-z/][\s\S]*>/i.test(plainText)) {
+      document.execCommand("insertHTML", false, plainText);
+    } else {
+      // Jika teks biasa, format menjadi paragraf agar rapi
+      const html = plainText
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .split(/\n\n+/)
+        .map(para => `<p>${para.replace(/\n/g, '<br>')}</p>`)
+        .join('');
+      document.execCommand("insertHTML", false, html);
+    }
     handleEditorInteraction();
   };
 
@@ -285,12 +274,10 @@ export default function App() {
     restoreSelection();
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
-
     let node = selection.anchorNode;
     let parent = node?.nodeType === 3 ? node.parentElement : node as HTMLElement;
     let targetNode = null;
-
-    // Traverse up to find if already wrapped
+    
     while (parent && parent !== editorRef.current) {
       if (parent.tagName.toLowerCase() === tag && (!className || parent.classList.contains(className))) {
         targetNode = parent;
@@ -298,16 +285,14 @@ export default function App() {
       }
       parent = parent.parentElement;
     }
-
+    
     if (targetNode) {
-      // Unwrap: Extract inner content and replace the node
       const docFrag = document.createDocumentFragment();
       while (targetNode.firstChild) {
         docFrag.appendChild(targetNode.firstChild);
       }
       targetNode.parentNode?.replaceChild(docFrag, targetNode);
     } else {
-      // Wrap selected text
       const text = selection.toString();
       if (!text) return;
       const html = className ? `<${tag} class="${className}">${text}</${tag}>` : `<${tag}>${text}</${tag}>`;
@@ -389,13 +374,17 @@ export default function App() {
       setIsMediaModalOpen(false);
       return;
     }
-
+    
     let html = `<p><br></p>`;
     if (mediaLayout === "single") {
       const item = validItems[0];
       const tag = item.type === "img" ? "img" : item.type === "video" ? "video" : "audio";
-      const captionAttr = mediaCaption ? `alt="${mediaCaption}" title="${mediaCaption}"` : "";
-      html += `<div class="media-wrapper"><${tag} src="${item.url}" ${captionAttr} controls /></div>`;
+      
+      if (mediaCaption) {
+        html += `<figure><${tag} src="${item.url}" controls /><figcaption>${mediaCaption}</figcaption></figure>`;
+      } else {
+        html += `<div class="media-wrapper"><${tag} src="${item.url}" controls /></div>`;
+      }
     } else {
       const containerTag = mediaLayout === "collage" ? "tg-collage" : "tg-slideshow";
       html += `<${containerTag} contenteditable="false">`;
@@ -408,8 +397,8 @@ export default function App() {
       }
       html += `</${containerTag}>`;
     }
+    
     html += `<p><br></p>`;
-
     document.execCommand("insertHTML", false, html);
     setIsMediaModalOpen(false);
     setMediaItems([{ type: "img", url: "" }]);
@@ -491,122 +480,85 @@ export default function App() {
     handleEditorInteraction();
   };
 
-  const compileHtmlToMarkdown = (node: Node, listDepth = 0): string => {
-    let markdown = "";
-    const children = node.childNodes;
-    
-    for (let i = 0; i < children.length; i++) {
-      const child = children[i];
+  const compileToTelegramHtml = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent || "";
+      return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as HTMLElement;
+      const tag = el.nodeName.toLowerCase();
       
-      if (child.nodeType === Node.TEXT_NODE) {
-        markdown += child.textContent;
-      } else if (child.nodeType === Node.ELEMENT_NODE) {
-        const element = child as HTMLElement;
-        const tag = element.nodeName.toLowerCase();
+      let innerHTML = Array.from(el.childNodes).map(c => compileToTelegramHtml(c)).join('');
+
+      switch (tag) {
+        // Inline Tags
+        case "b": case "strong": return `<b>${innerHTML}</b>`;
+        case "i": case "em": return `<i>${innerHTML}</i>`;
+        case "u": case "ins": return `<u>${innerHTML}</u>`;
+        case "s": case "strike": case "del": return `<s>${innerHTML}</s>`;
+        case "mark": return `<mark>${innerHTML}</mark>`;
+        case "code": return `<code>${innerHTML}</code>`;
+        case "sup": return `<sup>${innerHTML}</sup>`;
+        case "sub": return `<sub>${innerHTML}</sub>`;
+        case "cite": return `<cite>${innerHTML}</cite>`;
+        case "span":
+          if (el.classList.contains("tg-spoiler")) return `<tg-spoiler>${innerHTML}</tg-spoiler>`;
+          return innerHTML;
+        case "a": return `<a href="${el.getAttribute("href") || ""}">${innerHTML}</a>`;
         
-        if (tag === "b" || tag === "strong") {
-          markdown += `**${compileHtmlToMarkdown(element, listDepth)}**`;
-        } else if (tag === "i" || tag === "em") {
-          markdown += `*${compileHtmlToMarkdown(element, listDepth)}*`;
-        } else if (tag === "u") {
-          markdown += `__${compileHtmlToMarkdown(element, listDepth)}__`;
-        } else if (tag === "s" || tag === "strike" || tag === "del") {
-          markdown += `~~${compileHtmlToMarkdown(element, listDepth)}~~`;
-        } else if (tag === "mark") {
-          markdown += `==${compileHtmlToMarkdown(element, listDepth)}==`;
-        } else if (tag === "span" && element.classList.contains("tg-spoiler")) {
-          markdown += `||${compileHtmlToMarkdown(element, listDepth)}||`;
-        } else if (tag === "a") {
-          const href = element.getAttribute("href") || "";
-          markdown += `[${compileHtmlToMarkdown(element, listDepth)}](${href})`;
-        } else if (tag === "code") {
-          markdown += `\`${element.textContent}\``;
-        } else if (tag === "pre") {
-          const lang = element.getAttribute("data-language") || "";
-          const codeText = element.textContent || "";
-          markdown += `\n\`\`\`${lang}\n${codeText}\n\`\`\`\n\n`;
-        } else if (tag === "h1") { markdown += `\n# ${compileHtmlToMarkdown(element).trim()}\n\n`; } 
-          else if (tag === "h2") { markdown += `\n## ${compileHtmlToMarkdown(element).trim()}\n\n`; } 
-          else if (tag === "h3") { markdown += `\n### ${compileHtmlToMarkdown(element).trim()}\n\n`; } 
-          else if (tag === "h4") { markdown += `\n#### ${compileHtmlToMarkdown(element).trim()}\n\n`; } 
-          else if (tag === "h5") { markdown += `\n##### ${compileHtmlToMarkdown(element).trim()}\n\n`; } 
-          else if (tag === "h6") { markdown += `\n###### ${compileHtmlToMarkdown(element).trim()}\n\n`; } 
-          else if (tag === "blockquote") {
-          const lines = compileHtmlToMarkdown(element, listDepth).trim().split("\n");
-          markdown += "\n" + lines.map((l) => `> ${l}`).join("\n") + "\n\n";
-        } else if (tag === "ul" || tag === "ol") {
-          const items = element.children;
-          let listIndex = 1;
-          for (let j = 0; j < items.length; j++) {
-            const li = items[j];
-            if (li.nodeName.toLowerCase() === "li") {
-              const prefixSpace = "  ".repeat(listDepth);
-              const prefix = tag === "ol" ? `${listIndex}. ` : "- ";
-              markdown += `${prefixSpace}${prefix}${compileHtmlToMarkdown(li, listDepth + 1).trim()}\n`;
-              listIndex++;
-            }
-          }
-          if (listDepth === 0) markdown += "\n";
-        } else if (tag === "img" || tag === "video" || tag === "audio") {
-          const src = element.getAttribute("src") || "";
-          const alt = element.getAttribute("alt") || element.getAttribute("title") || "";
-          markdown += `\n![${alt}](${src})\n\n`;
-        } else if (tag === "tg-collage" || tag === "tg-slideshow") {
-          let mediaMd = `\n<${tag}>\n\n`;
-          const mediaChildren = element.childNodes;
-          for (let j = 0; j < mediaChildren.length; j++) {
-            const mc = mediaChildren[j] as HTMLElement;
-            if (mc.nodeName.toLowerCase() === "img" || mc.nodeName.toLowerCase() === "video") {
-              mediaMd += `![](${mc.getAttribute("src")})\n`;
-            } else if (mc.nodeName.toLowerCase() === "figcaption") {
-              mediaMd += `<figcaption>${mc.textContent}</figcaption>\n`;
-            }
-          }
-          mediaMd += `\n</${tag}>\n\n`;
-          markdown += mediaMd;
-        } else if (tag === "table") {
-          let tableMd = "\n";
-          const trs = element.querySelectorAll("tr");
-          trs.forEach((row, rowIndex) => {
-            const cells = row.querySelectorAll("th, td");
-            let rowStr = "|";
-            cells.forEach((cell) => {
-              rowStr += ` ${compileHtmlToMarkdown(cell, listDepth).trim()} |`;
-            });
-            tableMd += rowStr + "\n";
-            if (rowIndex === 0) {
-              let divStr = "|";
-              cells.forEach(() => { divStr += ":---|"; });
-              tableMd += divStr + "\n";
-            }
-          });
-          markdown += tableMd + "\n";
-        } else if (tag === "details") {
-          const summary = element.querySelector("summary");
-          const summaryText = summary ? compileHtmlToMarkdown(summary).trim() : "Details";
-          const clone = element.cloneNode(true) as HTMLElement;
-          const cloneSummary = clone.querySelector("summary");
-          if (cloneSummary) cloneSummary.remove();
-          const bodyText = compileHtmlToMarkdown(clone, listDepth).trim();
-          markdown += `\n<details open><summary>${summaryText}</summary>\n\n${bodyText}\n\n</details>\n\n`;
-        } else if (tag === "br") {
-          markdown += "\n";
-        } else if (tag === "div" || tag === "p") {
-          markdown += `${compileHtmlToMarkdown(element, listDepth)}\n`;
-        } else {
-          markdown += compileHtmlToMarkdown(element, listDepth);
-        }
+        // Block Tags & Paragraphs
+        case "p": case "div":
+          if (!innerHTML.trim() && el.querySelector('br')) return `<br>\n`;
+          return `<p>${innerHTML}</p>\n`;
+        case "br": return `<br>\n`;
+        case "hr": return `<hr/>\n`;
+        case "h1": case "h2": case "h3": case "h4": case "h5": case "h6":
+          return `<${tag}>${innerHTML}</${tag}>\n`;
+        case "blockquote": return `<blockquote>${innerHTML}</blockquote>\n`;
+        case "aside": return `<aside>${innerHTML}</aside>\n`;
+        
+        // Lists
+        case "ul": case "ol": return `<${tag}>\n${innerHTML}</${tag}>\n`;
+        case "li": return `<li>${innerHTML}</li>\n`;
+        
+        // Tables
+        case "table": return `<table>\n${innerHTML}</table>\n`;
+        case "thead": case "tbody": return `${innerHTML}`;
+        case "tr": return `<tr>${innerHTML}</tr>\n`;
+        case "th": case "td": return `<${tag}>${innerHTML}</${tag}>`;
+        
+        // Interactive / Telegram specific
+        case "details": return `<details open>\n${innerHTML}</details>\n`;
+        case "summary": return `<summary>${innerHTML}</summary>\n`;
+        
+        // Media & Code
+        case "pre":
+          const lang = el.getAttribute("data-language");
+          if (lang) return `<pre><code class="language-${lang}">${innerHTML}</code></pre>\n`;
+          return `<pre>${innerHTML}</pre>\n`;
+        case "figure": return `<figure>\n${innerHTML}</figure>\n`;
+        case "img": case "video": case "audio":
+          return `<${tag} src="${el.getAttribute("src") || ""}"></${tag}>\n`;
+        case "tg-collage": case "tg-slideshow":
+          return `<${tag}>\n${innerHTML}</${tag}>\n`;
+        case "figcaption": return `<figcaption>${innerHTML}</figcaption>\n`;
+        
+        default:
+          return innerHTML;
       }
     }
-    return markdown;
+    return "";
   };
 
-  const handleTabSwitch = (tab: "visual" | "markdown") => {
+  const handleTabSwitch = (tab: "visual" | "source") => {
     setActiveTab(tab);
-    let md = "";
-    if (tab === "markdown" && editorRef.current) {
-      md = compileHtmlToMarkdown(editorRef.current);
-      setMarkdownOutput(md.replace(/\n{3,}/g, '\n\n').trim());
+    if (tab === "source" && editorRef.current) {
+      let html = compileToTelegramHtml(editorRef.current);
+      // Membersihkan kelebihan spasi baris agar terlihat padat & rapi
+      html = html.replace(/\n\n+/g, '\n').trim();
+      setHtmlOutput(html);
     }
   };
 
@@ -617,16 +569,16 @@ export default function App() {
   };
 
   return (
-    <div className="app-wrapper">
+    <div className={`app-wrapper theme-${theme}`}>
       <div className={`sidebar-overlay ${isSidebarOpen ? "active" : ""}`} onClick={() => setIsSidebarOpen(false)} />
       <nav className={`sidebar ${isSidebarOpen ? "open" : ""}`}>
         <div className="sidebar-header">
           <span className="sidebar-title">Table of Contents</span>
-          <button className="icon-btn-flat" onClick={() => setIsSidebarOpen(false)}><X size={20} /></button>
+          <button className="icon-btn-flat" onClick={() => setIsSidebarOpen(false)}><X size={18} /></button>
         </div>
         <div className="sidebar-content">
           {headings.length === 0 ? (
-            <div className="empty-state">Start typing headings to see them here</div>
+            <div className="empty-state">No headings found</div>
           ) : (
             headings.map((h) => (
               <div key={h.id} className={`toc-item level-${h.level}`} onClick={() => scrollToHeading(h.id)}>
@@ -638,21 +590,24 @@ export default function App() {
       </nav>
 
       <div className="main-content">
-        <div className="top-bar-solid">
+        <header className="top-bar">
           <div className="top-left">
-            <button className="icon-btn" onClick={() => setIsSidebarOpen(true)}><Menu size={18} /></button>
+            <button className="icon-btn-flat" onClick={() => setIsSidebarOpen(true)}><Menu size={18} /></button>
+            <button className="icon-btn-flat" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+              {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
             <div className="undo-redo-group">
-              <button className="icon-btn-flat" onClick={() => executeCommand("undo")} title="Undo"><Undo size={18} /></button>
-              <button className="icon-btn-flat" onClick={() => executeCommand("redo")} title="Redo"><Redo size={18} /></button>
+              <button className="icon-btn-flat" onClick={() => executeCommand("undo")}><Undo size={16} /></button>
+              <button className="icon-btn-flat" onClick={() => executeCommand("redo")}><Redo size={16} /></button>
             </div>
           </div>
           <div className="tab-switcher">
             <button onClick={() => handleTabSwitch("visual")} className={`tab-btn ${activeTab === "visual" ? "active" : ""}`}>Editor</button>
-            <button onClick={() => handleTabSwitch("markdown")} className={`tab-btn ${activeTab === "markdown" ? "active" : ""}`}>Source</button>
+            <button onClick={() => handleTabSwitch("source")} className={`tab-btn ${activeTab === "source" ? "active" : ""}`}>Source</button>
           </div>
-        </div>
+        </header>
 
-        <div className="paper-wrapper">
+        <main className="editor-container">
           <div className={`tab-content ${activeTab === "visual" ? "active" : ""}`}>
             <div
               ref={editorRef}
@@ -664,23 +619,23 @@ export default function App() {
               onClick={handleEditorInteraction}
               onPaste={handlePaste}
               className="editor-surface"
-              data-placeholder="Draft your brilliant ideas here..."
+              data-placeholder="Start typing your document here..."
             />
           </div>
           
-          <div className={`tab-content ${activeTab === "markdown" ? "active" : ""}`}>
+          <div className={`tab-content ${activeTab === "source" ? "active" : ""}`}>
             <pre className="markdown-preview">
-              {markdownOutput || "No content generated yet."}
+              {htmlOutput || "No content generated yet."}
             </pre>
           </div>
-        </div>
+        </main>
 
-        <div className="bottom-info">
+        <footer className="bottom-info">
           <span className={charCount > MAX_CHARS ? "text-danger" : ""}>
             {charCount.toLocaleString()} / {MAX_CHARS.toLocaleString()} characters
           </span>
-          {charCount > MAX_CHARS && <div className="limit-warning">Character limit exceeded!</div>}
-        </div>
+          {charCount > MAX_CHARS && <div className="limit-warning">Limit exceeded!</div>}
+        </footer>
 
         {activeTab === "visual" && tableMenu.show && (
           <div className="table-context-menu" style={{ top: tableMenu.top, left: tableMenu.left }}>
@@ -696,57 +651,47 @@ export default function App() {
           <div className="smart-toolbar-container">
             {isHeadingMenuOpen && (
               <div className="heading-popover">
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<h1>"); }}><Heading1 size={18} /> <span>Heading 1</span></button>
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<h2>"); }}><Heading2 size={18} /> <span>Heading 2</span></button>
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<h3>"); }}><Heading3 size={18} /> <span>Heading 3</span></button>
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<h4>"); }}><Heading4 size={18} /> <span>Heading 4</span></button>
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<h5>"); }}><Heading5 size={18} /> <span>Heading 5</span></button>
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<h6>"); }}><Heading6 size={18} /> <span>Heading 6</span></button>
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<h1>"); }}><Heading1 size={16} /> <span>Heading 1</span></button>
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<h2>"); }}><Heading2 size={16} /> <span>Heading 2</span></button>
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<h3>"); }}><Heading3 size={16} /> <span>Heading 3</span></button>
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<h4>"); }}><Heading4 size={16} /> <span>Heading 4</span></button>
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<h5>"); }}><Heading5 size={16} /> <span>Heading 5</span></button>
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<h6>"); }}><Heading6 size={16} /> <span>Heading 6</span></button>
                 <div className="menu-divider" />
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<p>"); }}><Type size={18} /> <span>Paragraph</span></button>
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<p>"); }}><Type size={16} /> <span>Paragraph</span></button>
               </div>
             )}
-
             <div className="smart-toolbar">
               <div className="toolbar-inner">
-                <button onMouseDown={(e) => { e.preventDefault(); setIsHeadingMenuOpen(!isHeadingMenuOpen); }} className={`tool-btn ${isHeadingMenuOpen ? 'active' : ''}`} title="Heading"><Type size={18} /></button>
-                
+                <button onMouseDown={(e) => { e.preventDefault(); setIsHeadingMenuOpen(!isHeadingMenuOpen); }} className={`tool-btn ${isHeadingMenuOpen ? 'active' : ''}`}><Type size={16} /></button>
                 <div className="divider" />
-
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("bold"); }} className={`tool-btn ${activeFormats.bold ? "active" : ""}`} title="Bold"><Bold size={18} /></button>
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("italic"); }} className={`tool-btn ${activeFormats.italic ? "active" : ""}`} title="Italic"><Italic size={18} /></button>
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("underline"); }} className={`tool-btn ${activeFormats.underline ? "active" : ""}`} title="Underline"><Underline size={18} /></button>
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("strikeThrough"); }} className={`tool-btn ${activeFormats.strikeThrough ? "active" : ""}`} title="Strikethrough"><Strikethrough size={18} /></button>
-                <button onMouseDown={(e) => { e.preventDefault(); removeFormat(); }} className="tool-btn" title="Clear Formatting"><Eraser size={18} /></button>
-                
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("bold"); }} className={`tool-btn ${activeFormats.bold ? "active" : ""}`}><Bold size={16} /></button>
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("italic"); }} className={`tool-btn ${activeFormats.italic ? "active" : ""}`}><Italic size={16} /></button>
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("underline"); }} className={`tool-btn ${activeFormats.underline ? "active" : ""}`}><Underline size={16} /></button>
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("strikeThrough"); }} className={`tool-btn ${activeFormats.strikeThrough ? "active" : ""}`}><Strikethrough size={16} /></button>
+                <button onMouseDown={(e) => { e.preventDefault(); removeFormat(); }} className="tool-btn"><Eraser size={16} /></button>
                 <div className="divider" />
-                
-                <button onMouseDown={(e) => { e.preventDefault(); toggleCustomFormat("mark"); }} className="tool-btn" title="Toggle Highlight"><Highlighter size={18} /></button>
-                <button onMouseDown={(e) => { e.preventDefault(); toggleCustomFormat("span", "tg-spoiler"); }} className="tool-btn" title="Toggle Spoiler"><EyeOff size={18} /></button>
-                <button onMouseDown={(e) => { e.preventDefault(); openLinkModal(); }} className="tool-btn" title="Link"><LinkIcon size={18} /></button>
-
+                <button onMouseDown={(e) => { e.preventDefault(); toggleCustomFormat("mark"); }} className={`tool-btn ${activeFormats.highlight ? "active" : ""}`}><Highlighter size={16} /></button>
+                <button onMouseDown={(e) => { e.preventDefault(); toggleCustomFormat("span", "tg-spoiler"); }} className={`tool-btn ${activeFormats.spoiler ? "active" : ""}`}><EyeOff size={16} /></button>
+                <button onMouseDown={(e) => { e.preventDefault(); openLinkModal(); }} className="tool-btn"><LinkIcon size={16} /></button>
                 <div className="divider" />
-                
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("justifyLeft"); }} className="tool-btn"><AlignLeft size={18} /></button>
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("insertUnorderedList"); }} className={`tool-btn ${activeFormats.ul ? "active" : ""}`} title="Bullet List"><List size={18} /></button>
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("insertOrderedList"); }} className={`tool-btn ${activeFormats.ol ? "active" : ""}`} title="Numbered List"><ListOrdered size={18} /></button>
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("indent"); }} className="tool-btn" title="Indent (Nested List)"><Indent size={18} /></button>
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("outdent"); }} className="tool-btn" title="Outdent"><Outdent size={18} /></button>
-                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<blockquote>"); }} className="tool-btn" title="Quote"><Quote size={18} /></button>
-                <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); setIsCodeModalOpen(true); }} className="tool-btn" title="Code Block"><Code size={18} /></button>
-
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("justifyLeft"); }} className="tool-btn"><AlignLeft size={16} /></button>
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("insertUnorderedList"); }} className={`tool-btn ${activeFormats.ul ? "active" : ""}`}><List size={16} /></button>
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("insertOrderedList"); }} className={`tool-btn ${activeFormats.ol ? "active" : ""}`}><ListOrdered size={16} /></button>
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("indent"); }} className="tool-btn"><Indent size={16} /></button>
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("outdent"); }} className="tool-btn"><Outdent size={16} /></button>
+                <button onMouseDown={(e) => { e.preventDefault(); executeCommand("formatBlock", "<blockquote>"); }} className="tool-btn"><Quote size={16} /></button>
+                <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); setIsCodeModalOpen(true); }} className="tool-btn"><Code size={16} /></button>
                 <div className="divider" />
-
-                <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); setIsMediaModalOpen(true); }} className="tool-btn" title="Insert Media"><ImageIcon size={18} /></button>
-                <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); setIsTableModalOpen(true); }} className="tool-btn" title="Insert Table"><TableIcon size={18} /></button>
-                <button onMouseDown={(e) => { e.preventDefault(); insertCollapsible(); }} className="tool-btn" title="Collapsible"><FolderKanban size={18} /></button>
+                <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); setIsMediaModalOpen(true); }} className="tool-btn"><ImageIcon size={16} /></button>
+                <button onMouseDown={(e) => { e.preventDefault(); saveSelection(); setIsTableModalOpen(true); }} className="tool-btn"><TableIcon size={16} /></button>
+                <button onMouseDown={(e) => { e.preventDefault(); insertCollapsible(); }} className="tool-btn"><FolderKanban size={16} /></button>
               </div>
             </div>
           </div>
         )}
       </div>
 
-      {/* Table Modal */}
       <div className={`modal-overlay ${isTableModalOpen ? "active" : ""}`}>
         <div className="modal-box">
           <h2>Insert Table</h2>
@@ -767,10 +712,9 @@ export default function App() {
         </div>
       </div>
 
-      {/* Advanced Media Modal */}
       <div className={`modal-overlay ${isMediaModalOpen ? "active" : ""}`}>
         <div className="modal-box media-modal">
-          <h2>Insert Rich Media</h2>
+          <h2>Insert Media</h2>
           <div className="input-group">
             <label>Display Layout</label>
             <select value={mediaLayout} onChange={(e) => {
@@ -802,12 +746,10 @@ export default function App() {
           {mediaLayout !== "single" && mediaItems.length < 50 && (
             <button className="btn-add-media" onClick={addMediaItem}><Plus size={16} /> Add another media</button>
           )}
-
           <div className="input-group" style={{marginTop: '12px'}}>
             <label>Caption / Group Title</label>
             <input type="text" placeholder="Optional description..." value={mediaCaption} onChange={(e) => setMediaCaption(e.target.value)} />
           </div>
-
           <div className="modal-actions">
             <button className="btn-cancel" onClick={() => setIsMediaModalOpen(false)}>Cancel</button>
             <button className="btn-submit" onClick={insertMedia}>Insert Media</button>
@@ -815,7 +757,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Link Modal */}
       <div className={`modal-overlay ${isLinkModalOpen ? "active" : ""}`}>
         <div className="modal-box">
           <h2>Insert Hyperlink</h2>
@@ -834,7 +775,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Code Modal */}
       <div className={`modal-overlay ${isCodeModalOpen ? "active" : ""}`}>
         <div className="modal-box">
           <h2>Insert Code Block</h2>
