@@ -7,6 +7,47 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
+    if (url.pathname === "/api/publish") {
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+          },
+        });
+      }
+
+      if (request.method === "POST") {
+        try {
+          const body = (await request.json()) as any;
+          if (body.chat_id && body.markdown) {
+            const payload: SendRichMessagePayload = {
+              chat_id: body.chat_id,
+              rich_message: { markdown: body.markdown },
+            };
+            await sendRichMessage(env, payload);
+            return new Response(JSON.stringify({ ok: true }), {
+              headers: {
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "application/json",
+              },
+            });
+          }
+          return new Response(JSON.stringify({ error: "Missing payload" }), {
+            status: 400,
+            headers: { "Access-Control-Allow-Origin": "*" },
+          });
+        } catch (error) {
+          console.error("[API Error] Failed to parse request");
+          return new Response(JSON.stringify({ error: "Internal Error" }), {
+            status: 500,
+            headers: { "Access-Control-Allow-Origin": "*" },
+          });
+        }
+      }
+    }
+
     if (request.method === "POST" && url.pathname === "/webhook") {
       const secretHeader = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
       if (secretHeader !== env.WEBHOOK_SECRET) {
@@ -17,7 +58,7 @@ export default {
       try {
         const update: TelegramUpdate = await request.json();
         console.log(`[Webhook] Received update ID: ${update.update_id}`);
-        await handleUpdate(env, update);
+        await handleUpdate(env, update, request);
         return new Response("OK", { status: 200 });
       } catch (error) {
         console.error("[Webhook Error] Exception processing update:", error);
@@ -29,7 +70,7 @@ export default {
   },
 };
 
-async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
+async function handleUpdate(env: Env, update: TelegramUpdate, request: Request): Promise<void> {
   if (update.message) {
     const message = update.message;
     const chatId = message.chat.id;
@@ -46,19 +87,22 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       console.log(`[Handler] Command /start executed by user ${userId}`);
       const text = t(userLang, "welcome");
       const buttonText = t(userLang, "open_editor");
+      
+      const appUrl = new URL(env.APP_URL);
+      const host = request.headers.get("host") || "";
+      appUrl.searchParams.set("api", `https://${host}/api/publish`);
 
       await sendTextMessage(env, chatId, text, {
-        keyboard: [
+        inline_keyboard: [
           [
             {
               text: buttonText,
               web_app: {
-                url: env.APP_URL, // sesuaikan dengan nama variabelmu
+                url: appUrl.toString(),
               },
             },
           ],
         ],
-        resize_keyboard: true
       });
       return;
     }
@@ -66,7 +110,6 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     if (message.text === "/lang") {
       console.log(`[Handler] Command /lang executed by user ${userId}`);
       const text = t(userLang, "choose_language");
-
       await sendTextMessage(env, chatId, text, {
         inline_keyboard: [
           [
@@ -75,34 +118,6 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
           ],
         ],
       });
-      return;
-    }
-
-    if ((message as any).web_app_data) {
-      console.log(`[Handler] Web App data payload received from user ${userId}`);
-      const rawData = (message as any).web_app_data.data;
-      console.log(`[Handler] Raw payload: ${rawData}`);
-
-      try {
-        const parsed = JSON.parse(rawData);
-        if (parsed.markdown) {
-          console.log("[Handler] Sending Rich Message via Telegram Bot API 10.1/10.2");
-          const payload: SendRichMessagePayload = {
-            chat_id: chatId,
-            rich_message: {
-              markdown: parsed.markdown,
-            },
-          };
-
-          await sendRichMessage(env, payload);
-          await sendTextMessage(env, chatId, t(userLang, "article_sent"));
-          console.log(`[Handler] Rich Article delivered successfully to chat ${chatId}`);
-        }
-      } catch (error: any) {
-        console.error("[Handler Error] Failed to publish Rich Article:", error);
-        const errDetail = error?.message || "Unknown error";
-        await sendTextMessage(env, chatId, `⚠️ Delivery failed: ${errDetail}`);
-      }
       return;
     }
   }
@@ -118,8 +133,8 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     if (chatId && data && data.startsWith("set_lang_")) {
       const selectedLang = data.replace("set_lang_", "");
       await setUserLanguage(env.DB, userId, selectedLang);
-      const newText = t(selectedLang, "language_updated");
 
+      const newText = t(selectedLang, "language_updated");
       await answerCallbackQuery(env, callbackQuery.id, newText);
       await sendTextMessage(env, chatId, newText);
     }
